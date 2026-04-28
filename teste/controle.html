@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>VADE - Pro Controller</title>
+    <style>
+        :root {
+            --bg-color: #0a0f1e;
+            --remote-body: #1e293b;
+            --accent-cyan: #22d3ee;
+            --button-dark: #0f172a;
+            --joystick-base: #334155;
+            --stop-red: #ef4444;
+        }
+
+        body {
+            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg-color);
+            color: white;
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            overflow: hidden;
+            user-select: none;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        /* Corpo do Comando */
+        .remote-container {
+            background: var(--remote-body);
+            padding: 40px;
+            border-radius: 60px;
+            box-shadow: inset 0 2px 10px rgba(255,255,255,0.1), 
+                        0 20px 50px rgba(0,0,0,0.5);
+            border: 2px solid #334155;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            position: relative;
+        }
+
+        .brand {
+            font-size: 14px;
+            letter-spacing: 4px;
+            color: var(--accent-cyan);
+            margin-bottom: 20px;
+            opacity: 0.8;
+            font-weight: bold;
+        }
+
+        /* Painel de Status Digital */
+        .lcd-screen {
+            background: #000;
+            width: 180px;
+            height: 50px;
+            border-radius: 8px;
+            margin-bottom: 30px;
+            border: 2px solid #475569;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--accent-cyan);
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 18px;
+            text-shadow: 0 0 10px var(--accent-cyan);
+            box-shadow: inset 0 0 15px rgba(34, 211, 238, 0.2);
+        }
+
+        /* Grelha de Botões Ergonómica */
+        .d-pad {
+            display: grid;
+            grid-template-columns: repeat(3, 85px);
+            grid-template-rows: repeat(3, 85px);
+            gap: 10px;
+            background: var(--joystick-base);
+            padding: 15px;
+            border-radius: 100px; /* Estilo arredondado como um joystick */
+            box-shadow: inset 0 5px 15px rgba(0,0,0,0.4);
+        }
+
+        .btn {
+            background: var(--button-dark);
+            border: none;
+            border-radius: 50%;
+            color: white;
+            font-size: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: 0.1s;
+            box-shadow: 0 6px #000, 0 8px 15px rgba(0,0,0,0.4);
+            position: relative;
+        }
+
+        .btn:active {
+            box-shadow: 0 2px #000, 0 3px 5px rgba(0,0,0,0.4);
+            transform: translateY(4px);
+            background: var(--accent-cyan);
+            color: var(--bg-color);
+        }
+
+        .btn-stop {
+            background: var(--stop-red);
+            border-radius: 15px;
+            font-size: 18px;
+            font-weight: bold;
+            box-shadow: 0 6px #7f1d1d, 0 8px 15px rgba(0,0,0,0.4);
+        }
+
+        .btn-stop:active {
+            box-shadow: 0 2px #7f1d1d;
+            background: #ff0000;
+        }
+
+        /* Direções */
+        .up    { grid-area: 1 / 2 / 2 / 3; }
+        .left  { grid-area: 2 / 1 / 3 / 2; }
+        .stop  { grid-area: 2 / 2 / 3 / 3; }
+        .right { grid-area: 2 / 3 / 3 / 4; }
+        .down  { grid-area: 3 / 2 / 4 / 3; }
+
+        /* Decoração de "Grip" lateral */
+        .remote-container::before, .remote-container::after {
+            content: "";
+            position: absolute;
+            top: 50px;
+            width: 40px;
+            height: 200px;
+            background: linear-gradient(to bottom, #1e293b, #0f172a);
+            border-radius: 20px;
+            z-index: -1;
+        }
+        .remote-container::before { left: -20px; transform: rotate(-5deg); }
+        .remote-container::after { right: -20px; transform: rotate(5deg); }
+
+        .footer {
+            margin-top: 30px;
+            font-size: 10px;
+            color: #475569;
+            letter-spacing: 2px;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="remote-container">
+        <div class="brand">IADE PROJECT FACTORY</div>
+        
+        <div class="lcd-screen">
+            <span id="display">READY</span>
+        </div>
+
+        <div class="d-pad">
+            <div class="btn up" onmousedown="control('FRENTE')" onmouseup="control('PARAR')" ontouchstart="control('FRENTE')" ontouchend="control('PARAR')">▲</div>
+            <div class="btn left" onmousedown="control('ESQUERDA')" onmouseup="control('PARAR')" ontouchstart="control('ESQUERDA')" ontouchend="control('PARAR')">◀</div>
+            <div class="btn stop" onclick="control('PARAR')">STOP</div>
+            <div class="btn right" onmousedown="control('DIREITA')" onmouseup="control('PARAR')" ontouchstart="control('DIREITA')" ontouchend="control('PARAR')">▶</div>
+            <div class="btn down" onmousedown="control('TRAS')" onmouseup="control('PARAR')" ontouchstart="control('TRAS')" ontouchend="control('PARAR')">▼</div>
+        </div>
+        
+        <div class="footer">AUTONOMOUS DRIVING SYSTEM v2.0</div>
+    </div>
+
+    <script>
+        function control(cmd) {
+            const display = document.getElementById('display');
+            display.innerText = cmd;
+            
+            // Lógica de comunicação com o ESP32
+            let path = (cmd === 'PARAR') ? '/stop' : '/move?dir=' + cmd.toLowerCase();
+            
+            fetch(path).catch(err => {
+                console.log("Comando enviado: " + cmd);
+            });
+        }
+    </script>
+</body>
+</html>
