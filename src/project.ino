@@ -17,6 +17,7 @@ const int IN3 = 4;
 const int IN4 = 2;  
 
 // --- SENSORES INFRAVERMELHOS (TCRT5000) ---
+// Configurados para detetar as linhas das margens esquerda e direita
 const int IR_FRENTE_ESQ = 33; 
 const int IR_FRENTE_DIR = 25; 
 const int IR_TRAS_ESQ   = 26; 
@@ -34,12 +35,12 @@ const int PIN_SERVO = 23;
 // VARIÁVEIS DE CONTROLO DE VELOCIDADE
 // ==========================================
 int velocidadeNormal = 130; // Velocidade base para o plano (0-255)
-int velocidadeRampa  = 230; // Binário extra para subir a rampa de 10cm
+int velocidadeRampa  = 230; // Torque máximo para subir a rampa de 10cm
 int velocidadeAtual  = 130;
 
 // Estados de Condução Autónoma
-enum Estados { SEGUIR_LINHA_FRENTE, EVITAR_PAREDE, SEGUIR_LINHA_TRAS };
-Estados estadoAtual = SEGUIR_LINHA_FRENTE;
+enum Estados { CONDUZIR_NA_PISTA, EVITAR_PAREDE, MARCHA_ATRAS_ASSISTIDA };
+Estados estadoAtual = CONDUZIR_NA_PISTA;
 
 // ==========================================
 // INICIALIZAÇÃO DO SISTEMA
@@ -64,7 +65,7 @@ void setup() {
   
   // Configurar Servo
   pescoco.attach(PIN_SERVO);
-  pescoco.write(90); // Inicializa a olhar para a frente (90 graus)
+  pescoco.write(90); // Inicializa a olhar em frente (centro da pista)
   
   inicializarMPU();
   delay(500);
@@ -74,19 +75,19 @@ void setup() {
 // LOOP PRINCIPAL (EXECUÇÃO EM TEMPO REAL)
 // ==========================================
 void loop() {
-  // 1. O giroscópio avalia a inclinação e ajusta a potência em background
+  // 1. O giroscópio avalia a inclinação e injeta potência se estiver na rampa
   verificarRampa();
 
-  // 2. Execução da Máquina de Estados de Condução
+  // 2. Máquina de Estados de Condução Autónoma
   switch (estadoAtual) {
     
-    case SEGUIR_LINHA_FRENTE:
-      // Se detetar parede a menos de 18cm, pára e ativa o radar
+    case CONDUZIR_NA_PISTA:
+      // Verifica primeiro se há uma parede física à frente (Obstáculo)
       if (calcularDistancia() < 18) { 
         pararMotores();
         estadoAtual = EVITAR_PAREDE;
       } else {
-        logicaLinhaFrente();
+        logicaManterNaPista();
       }
       break;
       
@@ -94,27 +95,27 @@ void loop() {
       logicaRadarEvasao();
       break;
       
-    case SEGUIR_LINHA_TRAS:
-      logicaLinhaTras();
+    case MARCHA_ATRAS_ASSISTIDA:
+      logicaMarchaAtras();
       break;
   }
   
-  delay(10); // Pequena estabilização do ciclo
+  delay(10); 
 }
 
 // ==========================================
-// SUB-SISTEMA 1: GIROSCÓPIO / ACELERÓMETRO
+// SUB-SISTEMA 1: COMPENSAÇÃO DE RAMPA (MPU-6050)
 // ==========================================
 void inicializarMPU() {
-  Wire.beginTransmission(0x68); // Endereço I2C do MPU-6050
-  Wire.write(0x6B);             // Registo de gestão de energia
-  Wire.write(0);                // Desperta o chip
+  Wire.beginTransmission(0x68); 
+  Wire.write(0x6B);             
+  Wire.write(0);                
   Wire.endTransmission();
 }
 
 void verificarRampa() {
   Wire.beginTransmission(0x68);
-  Wire.write(0x3B);             // Começa a ler a partir do sensor de aceleração X
+  Wire.write(0x3B);             
   Wire.endTransmission(false);
   Wire.requestFrom(0x68, 6, true);
   
@@ -122,20 +123,20 @@ void verificarRampa() {
   int16_t AcY = Wire.read() << 8 | Wire.read();
   int16_t AcZ = Wire.read() << 8 | Wire.read();
 
-  // Calcular a inclinação em graus no eixo Y (Pitch)
+  // Calcular a inclinação em graus (Eixo Pitch)
   float inclinacao = atan2(AcY, AcZ) * 180 / PI;
 
-  // Se detetar uma inclinação superior a 15 graus, aumenta a força para subir a rampa
+  // Se a inclinação passar dos 15 graus, ativa o modo de alta potência para a rampa
   if (abs(inclinacao) > 15.0) { 
     velocidadeAtual = velocidadeRampa;
-    Serial.println("Rampa detetada! Modo High-Torque ativo.");
+    Serial.println("Rampa detetada! Força extra ativada.");
   } else {
     velocidadeAtual = velocidadeNormal;
   }
 }
 
 // ==========================================
-// SUB-SISTEMA 2: RADAR ULTRASSÓNICO (Mapeamento de Paredes)
+// SUB-SISTEMA 2: RADAR DE EVASÃO (Ultrassónico + Servo)
 // ==========================================
 int calcularDistancia() {
   digitalWrite(PIN_TRIG, LOW); 
@@ -144,120 +145,133 @@ int calcularDistancia() {
   delayMicroseconds(10);
   digitalWrite(PIN_TRIG, LOW);
   
-  long duracao = pulseIn(PIN_ECHO, HIGH, 30000); // Timeout de 30ms para não bloquear o código
+  long duracao = pulseIn(PIN_ECHO, HIGH, 30000); 
   int dist = duracao * 0.034 / 2;
   
-  return (dist == 0) ? 999 : dist; // Retorna um valor alto se falhar o pulso
+  return (dist == 0) ? 999 : dist; 
 }
 
 void logicaRadarEvasao() {
-  // 1. Move o pescoço para a Direita e mede
+  // 1. Roda o pescoço para a Direita e mede a distância da parede
   pescoco.write(30); 
   delay(400);
   int distDireita = calcularDistancia();
   
-  // 2. Move o pescoço para a Esquerda e mede
+  // 2. Roda o pescoço para a Esquerda e mede a distância da parede
   pescoco.write(150); 
   delay(500);
   int distEsquerda = calcularDistancia();
   
-  // 3. Centraliza o sensor novamente
+  // 3. Centraliza o radar novamente
   pescoco.write(90); 
   delay(300);
   
-  // Tomada de Decisão com Direção Diferencial
+  // Escolhe o caminho que tiver mais espaço livre longe das paredes
   if (distEsquerda > distDireita && distEsquerda > 20) {
     rodarParaEsquerda(); // Gira sobre o próprio eixo
-    delay(700);          // Tempo para desviar da parede
+    delay(650);          
   } else if (distDireita > distEsquerda && distDireita > 20) {
-    rodarParaDireita();
-    delay(700);
+    rodarParaDireita();  // Gira sobre o próprio eixo
+    delay(650);
   } else {
-    // Sem saída em ambos os lados? Aciona marcha-atrás assistida pelos sensores de trás
-    estadoAtual = SEGUIR_LINHA_TRAS;
+    // Se ambos os lados tiverem paredes bloqueadas, entra em marcha-atrás autónoma
+    estadoAtual = MARCHA_ATRAS_ASSISTIDA;
   }
   
-  if (estadoAtual != SEGUIR_LINHA_TRAS) {
-    estadoAtual = SEGUIR_LINHA_FRENTE; // Retoma seguimento frontal se saiu do bloqueio
+  if (estadoAtual != MARCHA_ATRAS_ASSISTIDA) {
+    estadoAtual = CONDUZIR_NA_PISTA; 
   }
 }
 
 // ==========================================
-// SUB-SISTEMA 3: SEGUIMENTO DE LINHA POR INFRAVERMELHOS
+// SUB-SISTEMA 3: NAVEGAÇÃO ENTRE MARGENS (LÓGICA INVERSA)
 // ==========================================
-void logicaLinhaFrente() {
+void logicaManterNaPista() {
   int esq = digitalRead(IR_FRENTE_ESQ);
   int dir = digitalRead(IR_FRENTE_DIR);
   
-  // Ambos no preto -> Linha centrada, avança reto
-  if (esq == 1 && dir == 1) {
+  // NOTA: Assume-se que '1' significa que o sensor pisou a fita da margem.
+  // Se o teu sensor atuar ao contrário (0 na fita), altera as igualdades abaixo.
+
+  // 1. Caminho Limpo: Ambos os sensores leem o chão livre do centro da pista
+  if (esq == 0 && dir == 0) {
     andarFrente();
   } 
-  // Só o esquerdo deteta preto -> Carro a fugir para a direita, corrige para a esquerda
+  // 2. Alerta Esquerdo: O carro aproximou-se demasiado da margem ESQUERDA. Foge para a DIREITA!
   else if (esq == 1 && dir == 0) {
-    virarEsquerdaSuave();
-  } 
-  // Só o direito deteta preto -> Carro a fugir para a esquerda, corrige para a direita
-  else if (esq == 0 && dir == 1) {
     virarDireitaSuave();
   } 
-  // Se perder a linha (chão claro), mantém em frente com velocidade moderada à procura dela
-  else {
-    andarFrente(); 
+  // 3. Alerta Direito: O carro aproximou-se demasiado da margem DIREITA. Foge para a ESQUERDA!
+  else if (esq == 0 && dir == 1) {
+    virarEsquerdaSuave();
+  } 
+  // 4. Emergência: Cruzamento de linhas ou erro. Trava por segurança.
+  else if (esq == 1 && dir == 1) {
+    pararMotores();
   }
 }
 
-void logicaLinhaTras() {
+void logicaMarchaAtras() {
   int esq = digitalRead(IR_TRAS_ESQ);
   int dir = digitalRead(IR_TRAS_DIR);
   
-  // Mantém a marcha-atrás guiada se os sensores traseiros lerem a linha preta
-  if (esq == 1 && dir == 1) {
+  // Recua mantendo-se longe das margens traseiras
+  if (esq == 0 && dir == 0) {
     andarTras();
+  } 
+  // Se a traseira esquerda tocar na margem esquerda, compensa a direção ao recuar
+  else if (esq == 1 && dir == 0) {
+    // Ajusta a rotação para alinhar a traseira
+    analogWrite(ENA, velocidadeNormal); analogWrite(ENB, velocidadeNormal / 2);
+    digitalWrite(IN1, LOW); digitalWrite(IN2, HIGH);
+    digitalWrite(IN3, LOW); digitalWrite(IN4, HIGH);
+  }
+  else if (esq == 0 && dir == 1) {
+    // Ajusta a rotação para alinhar a traseira
+    analogWrite(ENA, velocidadeNormal / 2); analogWrite(ENB, velocidadeNormal);
+    digitalWrite(IN1, LOW); digitalWrite(IN2, HIGH);
+    digitalWrite(IN3, LOW); digitalWrite(IN4, HIGH);
   }
   
-  // Se recuou o suficiente e a parede frontal está a mais de 25cm, regressa à marcha normal
+  // Se a parede da frente já estiver a uma distância segura (mais de 25cm), regressa à marcha normal
   if (calcularDistancia() > 25) { 
     pararMotores();
-    estadoAtual = SEGUIR_LINHA_FRENTE;
+    estadoAtual = CONDUZIR_NA_PISTA;
   }
 }
 
 // ==========================================
-// MOVIMENTOS FÍSICOS (Controlo de Direção Skid-Steering)
+// DRIVERS DE MOVIMENTO (Skid-Steering DIREÇÃO DIFERENCIAL)
 // ==========================================
 void andarFrente() {
   analogWrite(ENA, velocidadeAtual); 
   analogWrite(ENB, velocidadeAtual);
-  digitalWrite(IN1, HIGH); digitalWrite(IN2, LOW);  // Esquerda Avança
-  digitalWrite(IN3, HIGH); digitalWrite(IN4, LOW);  // Direita Avança
+  digitalWrite(IN1, HIGH); digitalWrite(IN2, LOW);  // Lado Esquerdo avança
+  digitalWrite(IN3, HIGH); digitalWrite(IN4, LOW);  // Lado Direito avança
 }
 
 void andarTras() {
   analogWrite(ENA, velocidadeNormal); 
   analogWrite(ENB, velocidadeNormal);
-  digitalWrite(IN1, LOW);  digitalWrite(IN2, HIGH); // Esquerda Recua
-  digitalWrite(IN3, LOW);  digitalWrite(IN4, HIGH); // Direita Recua
+  digitalWrite(IN1, LOW);  digitalWrite(IN2, HIGH); // Lado Esquerdo recua
+  digitalWrite(IN3, LOW);  digitalWrite(IN4, HIGH); // Lado Direito recua
 }
 
 void virarEsquerdaSuave() {
-  // Roda a esquerda mais devagar que a direita para curvar suavemente
-  analogWrite(ENA, velocidadeAtual / 3); 
+  analogWrite(ENA, velocidadeAtual / 3); // Desacelera a esquerda para curvar
   analogWrite(ENB, velocidadeAtual);
   digitalWrite(IN1, HIGH); digitalWrite(IN2, LOW);
   digitalWrite(IN3, HIGH); digitalWrite(IN4, LOW);
 }
 
 void virarDireitaSuave() {
-  // Roda a direita mais devagar que a esquerda para curvar suavemente
   analogWrite(ENA, velocidadeAtual); 
-  analogWrite(ENB, velocidadeAtual / 3);
+  analogWrite(ENB, velocidadeAtual / 3); // Desacelera a direita para curvar
   digitalWrite(IN1, HIGH); digitalWrite(IN2, LOW);
   digitalWrite(IN3, HIGH); digitalWrite(IN4, LOW);
 }
 
 void rodarParaEsquerda() {
-  // Inversão total de eixos (gira no próprio ponto para desvios de emergência)
   analogWrite(ENA, velocidadeNormal); 
   analogWrite(ENB, velocidadeNormal);
   digitalWrite(IN1, LOW);  digitalWrite(IN2, HIGH); // Esquerda para trás
@@ -265,7 +279,6 @@ void rodarParaEsquerda() {
 }
 
 void rodarParaDireita() {
-  // Inversão total de eixos (gira no próprio ponto para desvios de emergência)
   analogWrite(ENA, velocidadeNormal); 
   analogWrite(ENB, velocidadeNormal);
   digitalWrite(IN1, HIGH); digitalWrite(IN2, LOW);  // Esquerda para a frente
