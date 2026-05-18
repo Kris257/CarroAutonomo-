@@ -12,6 +12,7 @@
             --button-dark: #0f172a;
             --joystick-base: #334155;
             --stop-red: #ef4444;
+            --accent-green: #10b981;
         }
 
         body {
@@ -29,7 +30,6 @@
             -webkit-tap-highlight-color: transparent;
         }
 
-        /* Corpo do Comando */
         .remote-container {
             background: var(--remote-body);
             padding: 40px;
@@ -52,13 +52,12 @@
             font-weight: bold;
         }
 
-        
         .lcd-screen {
             background: #000;
             width: 180px;
             height: 50px;
             border-radius: 8px;
-            margin-bottom: 30px;
+            margin-bottom: 15px;
             border: 2px solid #475569;
             display: flex;
             align-items: center;
@@ -70,7 +69,31 @@
             box-shadow: inset 0 0 15px rgba(34, 211, 238, 0.2);
         }
 
-        
+        /* Botão de Troca de Modo */
+        .btn-mode {
+            background: var(--button-dark);
+            color: var(--accent-green);
+            border: 2px solid var(--accent-green);
+            border-radius: 12px;
+            width: 180px;
+            height: 40px;
+            font-weight: bold;
+            font-size: 12px;
+            letter-spacing: 1px;
+            margin-bottom: 25px;
+            cursor: pointer;
+            box-shadow: 0 4px rgba(0,0,0,0.4);
+            transition: all 0.2s;
+        }
+        .btn-mode.manual-active {
+            color: var(--accent-cyan);
+            border: 2px solid var(--accent-cyan);
+        }
+        .btn-mode:active {
+            transform: translateY(2px);
+            box-shadow: 0 2px rgba(0,0,0,0.4);
+        }
+
         .d-pad {
             display: grid;
             grid-template-columns: repeat(3, 85px);
@@ -117,14 +140,12 @@
             background: #ff0000;
         }
 
-        /* Direções */
         .up    { grid-area: 1 / 2 / 2 / 3; }
         .left  { grid-area: 2 / 1 / 3 / 2; }
         .stop  { grid-area: 2 / 2 / 3 / 3; }
         .right { grid-area: 2 / 3 / 3 / 4; }
         .down  { grid-area: 3 / 2 / 4 / 3; }
 
-        /
         .remote-container::before, .remote-container::after {
             content: "";
             position: absolute;
@@ -152,31 +173,53 @@
         <div class="brand">IADE PROJECT FACTORY</div>
         
         <div class="lcd-screen">
-            <span id="display">READY</span>
+            <span id="display">AUTÓNOMO</span>
         </div>
+
+        <button id="modeBtn" class="btn-mode" onclick="toggleMode()">MUDAR PARA MANUAL</button>
 
         <div class="d-pad">
             <div class="btn up" onmousedown="control('FRENTE')" onmouseup="control('PARAR')" ontouchstart="control('FRENTE')" ontouchend="control('PARAR')">▲</div>
             <div class="btn left" onmousedown="control('ESQUERDA')" onmouseup="control('PARAR')" ontouchstart="control('ESQUERDA')" ontouchend="control('PARAR')">◀</div>
-            <div class="btn stop" onclick="control('PARAR')">STOP</div>
+            <div class="btn stop btn-stop" onclick="control('PARAR')">STOP</div>
             <div class="btn right" onmousedown="control('DIREITA')" onmouseup="control('PARAR')" ontouchstart="control('DIREITA')" ontouchend="control('PARAR')">▶</div>
             <div class="btn down" onmousedown="control('TRAS')" onmouseup="control('PARAR')" ontouchstart="control('TRAS')" ontouchend="control('PARAR')">▼</div>
         </div>
         
-        <div class="footer">AUTONOMOUS DRIVING SYSTEM v2.0</div>
+        <div class="footer">HYBRID DRIVING SYSTEM v3.0</div>
     </div>
 
     <script>
-        function control(cmd) {
+        let modoManualAtivo = false;
+
+        function toggleMode() {
+            modoManualAtivo = !modoManualAtivo;
+            const btn = document.getElementById('modeBtn');
             const display = document.getElementById('display');
-            display.innerText = cmd;
             
-            // Lógica de comunicação com o ESP32
+            let modoStr = modoManualAtivo ? "manual" : "auto";
+            
+            if (modoManualAtivo) {
+                btn.innerText = "MUDAR PARA AUTÓNOMO";
+                btn.classList.add('manual-active');
+                display.innerText = "MANUAL: READY";
+            } else {
+                btn.innerText = "MUDAR PARA MANUAL";
+                btn.classList.remove('manual-active');
+                display.innerText = "AUTÓNOMO";
+            }
+
+            fetch('/setmode?mode=' + modoStr).catch(err => console.log("Erro ao mudar modo"));
+        }
+
+        function control(cmd) {
+            // Só atualiza o LCD se estiver em modo manual, para não chocar com a autonomia
+            if (modoManualAtivo) {
+                document.getElementById('display').innerText = cmd;
+            }
+            
             let path = (cmd === 'PARAR') ? '/stop' : '/move?dir=' + cmd.toLowerCase();
-            
-            fetch(path).catch(err => {
-                console.log("Comando enviado: " + cmd);
-            });
+            fetch(path).catch(err => console.log("Comando enviado: " + cmd));
         }
     </script>
 </body>
