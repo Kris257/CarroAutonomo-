@@ -4,24 +4,39 @@
 #include <WebServer.h>
 
 // ==========================================
-// CONFIGURAÇÃO DE PINOS (Conforme Esquema EasyEDA)
+// CONFIGURAÇÃO DE PINOS - HARDWARE DEFINITIVO
 // ==========================================
-const int ENA = 13; const int IN1 = 12; const int IN2 = 14; // Lado Esquerdo
-const int ENB = 19; const int IN3 = 4;  const int IN4 = 2;  // Lado Direito
 
-const int IR_FRENTE_ESQ = 33; const int IR_FRENTE_DIR = 25; 
-const int IR_TRAS_ESQ   = 26; const int IR_TRAS_DIR   = 27; 
+// --- DRIVER DO LADO ESQUERDO ---
+const int IN1_LE = 12; 
+const int IN2_LE = 14; 
+const int IN3_LE = 27; 
+const int IN4_LE = 13; 
 
-const int PIN_TRIG = 5; const int PIN_ECHO = 18;
-Servo pescoco; const int PIN_SERVO = 23;
+// --- DRIVER DO LADO DIREITO ---
+const int IN1_LD = 2;  // Corrigido para D2
+const int IN2_LD = 4;  
+const int IN3_LD = 23; 
+const int IN4_LD = 19; 
+
+// --- SENSORES INFRAVERMELHOS ---
+const int IR_FRENTE_ESQ = 33; 
+const int IR_FRENTE_DIR = 25; 
+const int IR_TRAS_ESQ   = 26; 
+const int IR_TRAS_DIR   = 32; 
+
+// --- ULTRASSÓNICO E SERVO ---
+const int PIN_TRIG = 5; 
+const int PIN_ECHO = 18;
+const int PIN_SERVO = 15;
 
 // ==========================================
 // SERVIDOR WEB E WI-FI AP
 // ==========================================
 WebServer server(80);
-const char* ssid = "VADE_Car_Controller"; // Nome da rede Wi-Fi do Carro
+const char* ssid = "VADE_Car_Controller";
 
-// Injeção direta da tua página Web dentro da memória do ESP32
+// Interface Web
 const char HTML_PAGINA[] PROGMEM = R"rawliteral(
 <!DOCTYPE html>
 <html lang="pt">
@@ -80,24 +95,19 @@ const char HTML_PAGINA[] PROGMEM = R"rawliteral(
 </html>
 )rawliteral";
 
-// ==========================================
-// VARIÁVEIS DE CONTROLO
-// ==========================================
-int velocidadeNormal = 130;
-int velocidadeRampa  = 230;
-int velocidadeAtual  = 130;
-
-// Máquina de Estados (Expandida para aceitar o modo Manual)
 enum Estados { CONDUZIR_NA_PISTA, EVITAR_PAREDE, MARCHA_ATRAS_ASSISTIDA, MODO_MANUAL };
 Estados estadoAtual = CONDUZIR_NA_PISTA;
+Servo pescoco;
 
 void setup() {
   Serial.begin(115200);
   Wire.begin(21, 22); 
   
-  // Motores e Sensores
-  pinMode(ENA, OUTPUT); pinMode(IN1, OUTPUT); pinMode(IN2, OUTPUT);
-  pinMode(ENB, OUTPUT); pinMode(IN3, OUTPUT); pinMode(IN4, OUTPUT);
+  // Motores
+  pinMode(IN1_LE, OUTPUT); pinMode(IN2_LE, OUTPUT); pinMode(IN3_LE, OUTPUT); pinMode(IN4_LE, OUTPUT);
+  pinMode(IN1_LD, OUTPUT); pinMode(IN2_LD, OUTPUT); pinMode(IN3_LD, OUTPUT); pinMode(IN4_LD, OUTPUT);
+  
+  // Sensores
   pinMode(IR_FRENTE_ESQ, INPUT); pinMode(IR_FRENTE_DIR, INPUT);
   pinMode(IR_TRAS_ESQ, INPUT);   pinMode(IR_TRAS_DIR, INPUT);
   pinMode(PIN_TRIG, OUTPUT);     pinMode(PIN_ECHO, INPUT);
@@ -105,24 +115,15 @@ void setup() {
   pescoco.attach(PIN_SERVO); pescoco.write(90);
   inicializarMPU();
 
-  // Configuração do ponto de acesso Wi-Fi do ESP32
   WiFi.softAP(ssid);
-  Serial.print("Rede Wi-Fi Iniciada: "); Serial.println(ssid);
-  Serial.print("IP para Conectar no Navegador: "); Serial.println(WiFi.softAPIP());
+  Serial.print("IP do Carro: "); Serial.println(WiFi.softAPIP());
 
-  // Rotas de Comunicação Web do Servidor
   server.on("/", []() { server.send(200, "text/html", HTML_PAGINA); });
   
   server.on("/setmode", []() {
     String modo = server.arg("mode");
-    if (modo == "manual") {
-      estadoAtual = MODO_MANUAL;
-      pararMotores();
-      Serial.println("Estado Alterado: MODO MANUAL ATIVO");
-    } else {
-      estadoAtual = CONDUZIR_NA_PISTA;
-      Serial.println("Estado Alterado: AUTÓNOMO ATIVO");
-    }
+    if (modo == "manual") { estadoAtual = MODO_MANUAL; pararMotores(); } 
+    else { estadoAtual = CONDUZIR_NA_PISTA; }
     server.send(200, "text/plain", "OK");
   });
 
@@ -137,61 +138,89 @@ void setup() {
     server.send(200, "text/plain", "OK");
   });
 
-  server.on("/stop", []() {
-    pararMotores();
-    server.send(200, "text/plain", "OK");
-  });
-
+  server.on("/stop", []() { pararMotores(); server.send(200, "text/plain", "OK"); });
   server.begin();
 }
 
 void loop() {
-  // Trata os pedidos Wi-Fi recebidos do teu telemóvel
   server.handleClient();
 
-  // Se estiver em modo manual, salta o processamento dos sensores automáticos
   if (estadoAtual == MODO_MANUAL) {
     delay(5);
     return; 
   }
 
-  // --- MODO AUTÓNOMO ATIVO ---
-  verificarRampa();
-
+  // --- LOGICA AUTÓNOMA ---
   switch (estadoAtual) {
     case CONDUZIR_NA_PISTA:
-      if (calcularDistancia() < 18) { 
-        pararMotores();
-        estadoAtual = EVITAR_PAREDE;
-      } else {
-        logicaManterNaPista();
-      }
+      if (calcularDistancia() < 18) { pararMotores(); estadoAtual = EVITAR_PAREDE; } 
+      else { logicaManterNaPista(); }
       break;
-      
     case EVITAR_PAREDE:
       logicaRadarEvasao();
       break;
-      
     case MARCHA_ATRAS_ASSISTIDA:
       logicaMarchaAtras();
       break;
-      
-    default: break;
   }
   delay(10);
 }
 
 // ==========================================
-// FUNÇÕES AUXILIARES E SUBSISTEMAS AUTÓNOMOS
+// CONTROLO DIRETO DOS MOTORES (SKID-STEERING)
+// ==========================================
+
+void andarFrente() {
+  // Lado Esquerdo Avança
+  digitalWrite(IN1_LE, HIGH); digitalWrite(IN2_LE, LOW);
+  digitalWrite(IN3_LE, HIGH); digitalWrite(IN4_LE, LOW);
+  // Lado Direito Avança
+  digitalWrite(IN1_LD, HIGH); digitalWrite(IN2_LD, LOW);
+  digitalWrite(IN3_LD, HIGH); digitalWrite(IN4_LD, LOW);
+}
+
+void andarTras() {
+  // Lado Esquerdo Recua
+  digitalWrite(IN1_LE, LOW); digitalWrite(IN2_LE, HIGH);
+  digitalWrite(IN3_LE, LOW); digitalWrite(IN4_LE, HIGH);
+  // Lado Direito Recua
+  digitalWrite(IN1_LD, LOW); digitalWrite(IN2_LD, HIGH);
+  digitalWrite(IN3_LD, LOW); digitalWrite(IN4_LD, HIGH);
+}
+
+void rodarParaEsquerda() {
+  // Lado Esquerdo Recua
+  digitalWrite(IN1_LE, LOW); digitalWrite(IN2_LE, HIGH);
+  digitalWrite(IN3_LE, LOW); digitalWrite(IN4_LE, HIGH);
+  // Lado Direito Avança
+  digitalWrite(IN1_LD, HIGH); digitalWrite(IN2_LD, LOW);
+  digitalWrite(IN3_LD, HIGH); digitalWrite(IN4_LD, LOW);
+}
+
+void rodarParaDireita() {
+  // Lado Esquerdo Avança
+  digitalWrite(IN1_LE, HIGH); digitalWrite(IN2_LE, LOW);
+  digitalWrite(IN3_LE, HIGH); digitalWrite(IN4_LE, LOW);
+  // Lado Direito Recua
+  digitalWrite(IN1_LD, LOW); digitalWrite(IN2_LD, HIGH);
+  digitalWrite(IN3_LD, LOW); digitalWrite(IN4_LD, HIGH);
+}
+
+void virarEsquerdaSuave() { rodarParaEsquerda(); }
+void virarDireitaSuave() { rodarParaDireita(); }
+
+void pararMotores() {
+  digitalWrite(IN1_LE, LOW); digitalWrite(IN2_LE, LOW);
+  digitalWrite(IN3_LE, LOW); digitalWrite(IN4_LE, LOW);
+  
+  digitalWrite(IN1_LD, LOW); digitalWrite(IN2_LD, LOW);
+  digitalWrite(IN3_LD, LOW); digitalWrite(IN4_LD, LOW);
+}
+
+// ==========================================
+// SUBSISTEMAS DE SENSORES
 // ==========================================
 void inicializarMPU() { Wire.beginTransmission(0x68); Wire.write(0x6B); Wire.write(0); Wire.endTransmission(); }
-
-void verificarRampa() {
-  Wire.beginTransmission(0x68); Wire.write(0x3B); Wire.endTransmission(false); Wire.requestFrom(0x68, 6, true);
-  int16_t AcX = Wire.read() << 8 | Wire.read(); int16_t AcY = Wire.read() << 8 | Wire.read(); int16_t AcZ = Wire.read() << 8 | Wire.read();
-  float inclinacao = atan2(AcY, AcZ) * 180 / PI;
-  velocidadeAtual = (abs(inclinacao) > 15.0) ? velocidadeRampa : velocidadeNormal;
-}
 
 int calcularDistancia() {
   digitalWrite(PIN_TRIG, LOW); delayMicroseconds(2);
@@ -207,8 +236,8 @@ void logicaRadarEvasao() {
   pescoco.write(150); delay(500); int distEsquerda = calcularDistancia();
   pescoco.write(90); delay(300);
   
-  if (distEsquerda > distDireita && distEsquerda > 20) { rodarParaEsquerda(); delay(650); } 
-  else if (distDireita > distEsquerda && distDireita > 20) { rodarParaDireita(); delay(650); } 
+  if (distEsquerda > distDireita && distEsquerda > 20) { rodarParaEsquerda(); delay(800); } 
+  else if (distDireita > distEsquerda && distDireita > 20) { rodarParaDireita(); delay(800); } 
   else { estadoAtual = MARCHA_ATRAS_ASSISTIDA; }
   
   if (estadoAtual != MARCHA_ATRAS_ASSISTIDA) estadoAtual = CONDUZIR_NA_PISTA;
@@ -225,16 +254,5 @@ void logicaManterNaPista() {
 void logicaMarchaAtras() {
   int esq = digitalRead(IR_TRAS_ESQ); int dir = digitalRead(IR_TRAS_DIR);
   if (esq == 0 && dir == 0) andarTras();
-  else if (esq == 1 && dir == 0) { analogWrite(ENA, velocidadeNormal); analogWrite(ENB, velocidadeNormal / 2); digitalWrite(IN1, LOW); digitalWrite(IN2, HIGH); digitalWrite(IN3, LOW); digitalWrite(IN4, HIGH); }
-  else if (esq == 0 && dir == 1) { analogWrite(ENA, velocidadeNormal / 2); analogWrite(ENB, velocidadeNormal); digitalWrite(IN1, LOW); digitalWrite(IN2, HIGH); digitalWrite(IN3, LOW); digitalWrite(IN4, HIGH); }
   if (calcularDistancia() > 25) { pararMotores(); estadoAtual = CONDUZIR_NA_PISTA; }
 }
-
-// DRIVERS DE MOVIMENTO (Skid-Steering)
-void andarFrente() { analogWrite(ENA, velocidadeAtual); analogWrite(ENB, velocidadeAtual); digitalWrite(IN1, HIGH); digitalWrite(IN2, LOW); digitalWrite(IN3, HIGH); digitalWrite(IN4, LOW); }
-void andarTras() { analogWrite(ENA, velocidadeNormal); analogWrite(ENB, velocidadeNormal); digitalWrite(IN1, LOW); digitalWrite(IN2, HIGH); digitalWrite(IN3, LOW); digitalWrite(IN4, HIGH); }
-void virarEsquerdaSuave() { analogWrite(ENA, velocidadeAtual / 3); analogWrite(ENB, velocidadeAtual); digitalWrite(IN1, HIGH); digitalWrite(IN2, LOW); digitalWrite(IN3, HIGH); digitalWrite(IN4, LOW); }
-void virarDireitaSuave() { analogWrite(ENA, velocidadeAtual); analogWrite(ENB, velocidadeAtual / 3); digitalWrite(IN1, HIGH); digitalWrite(IN2, LOW); digitalWrite(IN3, HIGH); digitalWrite(IN4, LOW); }
-void rodarParaEsquerda() { analogWrite(ENA, velocidadeNormal); analogWrite(ENB, velocidadeNormal); digitalWrite(IN1, LOW); digitalWrite(IN2, HIGH); digitalWrite(IN3, HIGH); digitalWrite(IN4, LOW); }
-void rodarParaDireita() { analogWrite(ENA, velocidadeNormal); analogWrite(ENB, velocidadeNormal); digitalWrite(IN1, HIGH); digitalWrite(IN2, LOW); digitalWrite(IN3, LOW); digitalWrite(IN4, HIGH); }
-void pararMotores() { analogWrite(ENA, 0); analogWrite(ENB, 0); digitalWrite(IN1, LOW); digitalWrite(IN2, LOW); digitalWrite(IN3, LOW); digitalWrite(IN4, LOW); }
