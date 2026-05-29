@@ -1,17 +1,17 @@
 #include <WiFi.h>
 #include <WebServer.h>
 
-// ==========================================
-// 1. PINOS DOS MOTORES (ESPECÍFICO ESP32-S2)
-// ==========================================
+
+// 1. PINOS DOS MOTORES 
+
 const int IN1_LE = 4;  const int IN2_LE = 5; 
 const int IN3_LE = 6;  const int IN4_LE = 7; 
 const int IN1_LD = 8;  const int IN2_LD = 9;  
 const int IN3_LD = 10; const int IN4_LD = 11; 
 
-// ==========================================
-// 2. PINOS DOS SENSORES (INFRAVERMELHOS E 3x ULTRASSÓNICOS)
-// ==========================================
+
+// 2. PINOS DOS SENSORES 
+
 const int SENSOR_FRENTE_ESQ = 12; 
 const int SENSOR_FRENTE_DIR = 13; 
 
@@ -19,11 +19,11 @@ const int SENSOR_FRENTE_DIR = 13;
 const int PIN_TRIG_CENTRO = 16; 
 const int PIN_ECHO_CENTRO = 17; 
 
-// Ultrassónico Esquerdo (Novos Pinos)
+// Ultrassónico Esquerdo 
 const int PIN_TRIG_ESQ = 18;
 const int PIN_ECHO_ESQ = 21;
 
-// Ultrassónico Direito (Novos Pinos)
+// Ultrassónico Direito 
 const int PIN_TRIG_DIR = 33;
 const int PIN_ECHO_DIR = 34;
 
@@ -34,9 +34,9 @@ const int PIN_ECHO_DIR = 34;
 const int DISTANCIA_PARAR = 25;    // frentDist <= distanciaParar
 const int DISTANCIA_LATERAL = 15;  // esquerdaDist ou direitaDist <= distanciaLateral
 
-// ==========================================
+
 // 3. CONTROLES E VARIÁVEIS DE ESTADO
-// ==========================================
+
 int velManual = 210;      
 int velAutoReto = 70;      
 int velAutoCurva = 130;    
@@ -46,12 +46,12 @@ bool modoAutonomo = false;
 WebServer server(80);
 const char* ssid = "VADE_Car_Controller";
 
-// Armazenamento global da última distância do centro para a interface web
+
 int ultimaDistanciaCentro = 999;
 
-// ==========================================
+
 // 4. INTERFACE WEB
-// ==========================================
+
 const char HTML_PAGINA[] PROGMEM = R"rawliteral(
 <!DOCTYPE html>
 <html lang="pt">
@@ -125,9 +125,9 @@ const char HTML_PAGINA[] PROGMEM = R"rawliteral(
 </html>
 )rawliteral";
 
-// ==========================================
-// 5. SETUP E INICIALIZAÇÃO
-// ==========================================
+
+// 5. SETUP 
+
 void setup() {
   Serial.begin(115200);
   
@@ -179,9 +179,9 @@ void setup() {
   parar(); 
 }
 
-// ==========================================
-// FUNÇÃO AUXILIAR: MEDIR DISTÂNCIA DE UM SENSOR ESPECÍFICO
-// ==========================================
+
+// Funçao para medir a distancia 
+
 long medirDistancia(int pinTrig, int pinEcho) {
   digitalWrite(pinTrig, LOW);
   delayMicroseconds(2);
@@ -194,9 +194,8 @@ long medirDistancia(int pinTrig, int pinEcho) {
   return duracao * 0.034 / 2;
 }
 
-// ==========================================
 // 6. LÓGICA DO PILOTO AUTOMÁTICO (3x ULTRASSÓNICOS + LINHA)
-// ==========================================
+
 void pilotoAutomatico() {
   // Leitura sequencial dos 3 Ultrassónicos com delay entre eles para evitar ecos falsos
   long frenteDist = medirDistancia(PIN_TRIG_CENTRO, PIN_ECHO_CENTRO);
@@ -213,40 +212,39 @@ void pilotoAutomatico() {
   int linhaEsq = digitalRead(SENSOR_FRENTE_ESQ);
   int linhaDir = digitalRead(SENSOR_FRENTE_DIR);
 
-  // Debug via Serial Monitor
+  
   Serial.print("F: "); Serial.print(frenteDist);
   Serial.print(" | E: "); Serial.print(esquerdaDist);
   Serial.print(" | D: "); Serial.print(direitaDist);
   Serial.print(" | IR_E: "); Serial.print(linhaEsq);
   Serial.print(" | IR_D: "); Serial.println(linhaDir);
 
-  // --- REGRAS DE PRIORIDADE E TOMADA DE DECISÃO ---
 
-  // 1. Sensor Esquerdo toca na linha preta isoladamente -> Corrige para a direita
+  
   if (linhaEsq == LINHA_PRETA && linhaDir != LINHA_PRETA) {
     parar(); delay(100);
     irTras(velAutoReto); delay(200);
     virarDireita(velAutoCurva); delay(850);
     parar(); delay(100);
   }
-  // 2. Sensor Direito toca na linha preta isoladamente -> Corrige para a esquerda
+  
   else if (linhaDir == LINHA_PRETA && linhaEsq != LINHA_PRETA) {
     parar(); delay(100);
     irTras(velAutoReto); delay(200);
     virarEsquerda(velAutoCurva); delay(850);
     parar(); delay(100);
   }
-  // 3. Ambos na linha preta -> Continua em frente de acordo com o teu algoritmo original
+  
   else if (linhaEsq == LINHA_PRETA && linhaDir == LINHA_PRETA) {
     irFrente(velAutoReto);
   }
-  // 4. Deteta obstáculo fixo / parede mesmo em frente
+  
   else if (frenteDist <= DISTANCIA_PARAR) {
     parar(); delay(150);
     irTras(velAutoReto); delay(300);
     parar(); delay(100);
 
-    // Decide o caminho baseado no lado que tiver mais espaço livre
+    
     if (esquerdaDist > direitaDist) {
       virarEsquerda(velAutoCurva); delay(850);
     } else {
@@ -254,25 +252,25 @@ void pilotoAutomatico() {
     }
     parar(); delay(100);
   }
-  // 5. Demasiado perto da parede esquerda (Ajuste lateral)
+ 
   else if (esquerdaDist <= DISTANCIA_LATERAL) {
     virarDireita(velAutoCurva); delay(250);
     parar(); delay(50);
   }
-  // 6. Demasiado perto da parede direita (Ajuste lateral)
+  
   else if (direitaDist <= DISTANCIA_LATERAL) {
     virarEsquerda(velAutoCurva); delay(250);
     parar(); delay(50);
   }
-  // 7. Caminho completamente limpo
+  
   else {
     irFrente(velAutoReto);
   }
 }
 
-// ==========================================
+
 // 7. FUNÇÕES DE MOVIMENTO ADAPTADAS ÀS TUAS PONTES H
-// ==========================================
+
 void irFrente(int vel) { 
   analogWrite(IN1_LE, vel); analogWrite(IN2_LE, 0); 
   analogWrite(IN3_LE, vel); analogWrite(IN4_LE, 0); 
@@ -308,9 +306,9 @@ void parar() {
   analogWrite(IN3_LD, 0); analogWrite(IN4_LD, 0); 
 }
 
-// ==========================================
+
 // 8. LOOP PRINCIPAL
-// ==========================================
+
 void loop() {
   server.handleClient();
   
